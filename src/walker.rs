@@ -1,36 +1,48 @@
-use futures::future::{ok, poll_fn};
-use std::fs::Metadata;
-use std::sync::Arc;
-use std::io::Error;
+use crate::error::Result;
+use nix::fcntl::OFlag;
+use nix::sys::stat::{FileStat, Mode, SFlag};
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
-use tokio::fs::read_dir;
-use tokio::prelude::*;
 
-pub fn walk<F>(base: PathBuf, visit: F) -> impl Future<Item=(), Error=Error> + Send + 'static
-    where F: Fn(&Path, &Metadata) -> () + Send + Sync + 'static {
-    walk_helper(base, Arc::new(visit))
+pub fn walk(base: &Path, visitor: &mut impl Visitor) -> Result<()> {
+    let fd = nix::fcntl::open(base, OFlag::O_DIRECTORY, Mode::empty())?;
+    walk_helper(base, fd, visitor)
 }
 
-fn walk_helper<F>(base: PathBuf, visit: Arc<F>) -> impl Future<Item=(), Error=Error> + Send + 'static
-    where F: Fn(&Path, &Metadata) -> () + Send + Sync + 'static {
-    read_dir(base)
-        .flatten_stream()
-        .for_each(move |entry| {
-            let path = entry.path();
-            let visit = visit.clone();
-            poll_fn(move || entry.poll_metadata())
-                .and_then(move |meta| {
-                    let res: Box<Future<Item=(), Error=Error> + Send> = if meta.is_file() {
-                        visit(&path, &meta);
-                        Box::new(ok(()))
-                    } else if meta.is_dir() {
-                        Box::new(walk_helper(path, visit))
-                    } else {
-                        Box::new(ok(()))
-                    };
-                    res
-                })
-        })
+fn walk_helper(base_path: &Path, base_dir: RawFd, visitor: &mut impl Visitor) -> Result<()> {
+    if !visitor.enter_directory(base_dir, base_path)? {
+        return Ok(())
+    }
+
+    for entry in nix::dir::Dir::from_fd(base_dir)?.iter() {
+        let entry = entry?;
+        let name = entry.file_name();
+        let fd = nix::fcntl::openat(base_dir, name, OFlag::empty(), Mode::empty())?;
+        let stat = nix::sys::stat::fstat(fd)?;
+        let ftype = SFlag::from_bits_truncate(stat.st_mode);
+        if ftype == SFlag::S_IFREG {
+            let mut path = PathBuf::from(base_path);
+            path.push(OsStr::from_bytes(name.to_bytes()));
+            visitor.visit(fd, &path, &stat)?;
+        } else if ftype == SFlag::S_IFDIR && name.to_str().unwrap() != "." && name.to_str().unwrap() != ".." {
+            let mut path = PathBuf::from(base_path);
+            path.push(OsStr::from_bytes(name.to_bytes()));
+            walk_helper(&path, fd, visitor)?;
+        } else {
+            nix::unistd::close(fd)?;
+        }
+    }
+    visitor.leave_directory()?;
+
+    Ok(())
+}
+
+pub trait Visitor {
+    fn enter_directory(&mut self, fd: RawFd, path: &Path) -> Result<bool>;
+    fn leave_directory(&mut self) -> Result<()>;
+    fn visit(&mut self, fd: RawFd, path: &Path, stat: &FileStat) -> Result<()>;
 }
 
 pub fn extension(path: &Path) -> String {

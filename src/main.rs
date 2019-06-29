@@ -1,20 +1,21 @@
 #[macro_use]
-extern crate futures;
+extern crate quick_error;
 
 mod collectors;
+mod error;
 mod walker;
 
-use collectors::PerExtensionCountSender;
+use collectors::PerExtensionCount;
 use clap::{Arg, App};
-use futures::future::ok;
-use futures::prelude::*;
+use error::Result;
+use nix::sys::stat::FileStat;
 use std::fmt::Debug;
 use std::fs::Metadata;
+use std::fs::File;
+use std::io::Read;
+use std::os::unix::io::{FromRawFd, RawFd};
 use std::path::Path;
-use tokio;
-use tokio::fs::File;
-use tokio::prelude::*;
-use tokio::run;
+use walker::{Visitor, extension, walk};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CountType {
@@ -52,144 +53,71 @@ fn main() {
     };
 
     let human_readable = matches.is_present("h");
-
     let base_dir = matches.value_of("DIRECTORY").unwrap_or(".").to_owned();
 
-    let (fut, chan) = collectors::counter();
+    let mut visitor = Counter {
+        counts: PerExtensionCount::new(),
+        count_type
+    };
+    walker::walk(&Path::new(&base_dir), &mut visitor).unwrap();
 
-    let prog = ok(()).and_then(move |_| {
-        let walker = walker::walk(Path::new(&base_dir).to_path_buf(),
-            move |path, meta| count_file(count_type, path, meta, chan.clone()));
-        spawn(walker);
-        fut
-    })
-    .map(move |counts| {
-        if !human_readable {
-            print_counts(counts, None);
-        } else if count_type == CountType::Bytes {
-            print_counts(counts, Some(1024));
-        } else {
-            print_counts(counts, Some(1000));
-        }
-    })
-    .map_err(|e| panic!("{}", e));
-    run(prog);
-}
-
-fn spawn<F, E>(fut: F)
-    where F: Future<Error=E> + Send + 'static,
-          E: Debug {
-    tokio::executor::spawn(fut.map(|_| ()).map_err(|e| panic!("{:?}", e)));
-}
-
-fn count_file(ctype: CountType, path: &Path, meta: &Metadata, chan: PerExtensionCountSender) {
-    let ext = walker::extension(path);
-    match ctype {
-        CountType::Files => spawn(chan.send((ext, 1))),
-        CountType::Bytes => spawn(chan.send((ext, meta.len()))),
-        CountType::Lines => spawn(count_lines(path)
-            .map_err(|e| panic!("{}", e))
-            .then(|c| chan.send((ext, c.unwrap() as u64))))
+    if !human_readable {
+        visitor.counts.print_counts(None);
+    } else if count_type == CountType::Bytes {
+        visitor.counts.print_counts(Some(1024));
+    } else {
+        visitor.counts.print_counts(Some(1000));
     }
 }
 
-fn count_lines(path: &Path) -> impl Future<Item=usize, Error=std::io::Error> {
-    File::open(path.to_owned())
-        .and_then(|stream| {
-            LineCounter {
-                stream,
-                buf: [0;102400],
-                count: 0
-            }
-        })
+struct Counter {
+    counts: PerExtensionCount,
+    count_type: CountType
 }
 
-struct LineCounter<R> {
-    stream: R,
-    buf: [u8;102400],
-    count: usize
+impl Visitor for Counter {
+    fn enter_directory(&mut self, fd: RawFd, path: &Path) -> Result<bool> {
+        Ok(true)
+    }
+
+    fn leave_directory(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    fn visit(&mut self, fd: RawFd, path: &Path, stat: &FileStat) -> Result<()> {
+        let ext = walker::extension(path);
+        let count = match self.count_type {
+            CountType::Files =>  {
+                nix::unistd::close(fd)?;
+                1
+            },
+            CountType::Bytes => {
+                nix::unistd::close(fd)?;
+                stat.st_size as u64
+            },
+            CountType::Lines => count_lines(fd)?
+        };
+        self.counts.increment(ext, count);
+        Ok(())
+    }
 }
 
-impl <R> Future for LineCounter<R>
-    where R: AsyncRead {
-    type Item = usize;
-    type Error = std::io::Error;
+fn count_lines(fd: RawFd) -> Result<u64> {
+    let mut file = unsafe { File::from_raw_fd(fd) };
+    let mut buf = [0;102400];
+    let mut result = 0;
 
-    fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
-        #[allow(irrefutable_let_patterns)]
-        while let count = try_ready!(self.stream.poll_read(&mut self.buf)) {
-            if count == 0 {
-                break;
-            }
+    #[allow(irrefutable_let_patterns)]
+    while let count = file.read(&mut buf)? {
+        if count == 0 {
+            break;
+        }
 
-            for c in self.buf[0..count].iter() {
-                if *c == 0x0A {
-                    self.count += 1;
-                }
+        for c in buf[0..count].iter() {
+            if *c == 0x0A {
+                result += 1;
             }
         }
-        Ok(Async::Ready(self.count))
     }
-}
-
-fn print_counts(counts: collectors::PerExtensionCount, human_readable_base: Option<u64>) {
-    if counts.is_empty() {
-        return;
-    }
-
-    let mut counts: Vec<(String, u64)> = counts.into_iter().collect();
-    counts.sort_unstable_by(|(ref ext1, ref count1), (ref ext2, ref count2)|
-        count1.cmp(count2)
-            .reverse()
-            .then(ext1.cmp(ext2)));
-
-    let mut max_len = counts.iter()
-        .map(|(ref ext, _)| ext.len())
-        .max()
-        .unwrap();
-    if max_len > 0 {
-        max_len += 1;
-    }
-
-    counts.iter_mut().for_each(|(ref mut ext, _)| {
-        if !ext.is_empty() {
-            ext.insert_str(0, ".");
-        }
-        for _ in ext.len()..max_len {
-            ext.push(' ');
-        }
-    });
-
-    for (ext, count) in counts {
-        if human_readable_base.is_none() {
-            println!("{} {}", ext, count);
-        } else {
-            println!("{} {}", ext, format_human_readable(count, human_readable_base.unwrap()))
-        }
-    }
-}
-
-fn format_human_readable(mut num: u64, base: u64) -> String {
-    let mut suffix = "";
-    if num >= 10000 {
-        num /= base;
-        suffix = "K";
-    }
-
-    if num >= 10000 {
-        num /= base;
-        suffix = "M";
-    }
-    
-    if num >= 10000 {
-        num /= base;
-        suffix = "G";
-    }
-    
-    if num >= 10000 {
-        num /= base;
-        suffix = "T";
-    }
-
-    format!("{}{}", num, suffix)
+    Ok(result)
 }

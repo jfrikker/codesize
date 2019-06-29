@@ -7,6 +7,5 @@ edition = "2018"
 [dependencies]
 bitflags = "=1.0.4"
 clap = "2.33"
-futures = "0.1"
-tokio = "0.1"
-tokio-fs = "0.1"
+nix = "0.14"
+quick-error = "1.2"
