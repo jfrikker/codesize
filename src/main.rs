@@ -52,13 +52,15 @@ fn main() -> Result<()> {
 
     for entry in WalkDir::new(base_dir) {
         let entry = entry?;
-        let ext = extension(entry.path());
-        let count = match count_type {
-            CountType::Files => 1,
-            CountType::Bytes => entry.metadata()?.len(),
-            CountType::Lines => count_lines(entry.path())?
-        };
-        counts.increment(ext, count);
+        if entry.file_type().is_file() {
+            let ext = extension(entry.path());
+            let count = match count_type {
+                CountType::Files => 1,
+                CountType::Bytes => entry.metadata()?.len(),
+                CountType::Lines => count_lines(entry.path())?
+            };
+            counts.increment(ext, count);
+        }
     }
 
     if !human_readable {
@@ -73,9 +75,23 @@ fn main() -> Result<()> {
 }
 
 fn count_lines(path: &Path) -> Result<u64> {
-    let file = File::open(path)?;
-    let file = BufReader::new(file);
-    Ok(file.lines().count() as u64)
+    let mut file = File::open(path)?;
+    let mut buf = [0;102400];
+    let mut result = 0;
+
+    #[allow(irrefutable_let_patterns)]
+    while let count = file.read(&mut buf)? {
+        if count == 0 {
+            break;
+        }
+
+        for c in buf[0..count].iter() {
+            if *c == 0x0A {
+                result += 1;
+            }
+        }
+    }
+    Ok(result)
 }
 
 pub fn extension(path: &Path) -> String {
