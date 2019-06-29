@@ -54,6 +54,7 @@ impl PerExtensionCount {
     }
 }
 
+#[allow(clippy::useless_let_if_seq)]
 fn format_human_readable(mut num: u64, base: u64) -> String {
     let mut suffix = "";
     if num >= 10000 {

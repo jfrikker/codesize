@@ -2,6 +2,7 @@ mod collectors;
 
 use collectors::PerExtensionCount;
 use clap::{Arg, App};
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{Read, Result};
 use std::path::Path;
@@ -73,7 +74,7 @@ fn main() -> Result<()> {
 
 fn count_lines(path: &Path) -> Result<u64> {
     let mut file = File::open(path)?;
-    let mut buf = [0;102400];
+    let mut buf = [0;102_400];
     let mut result = 0;
 
     #[allow(irrefutable_let_patterns)]
@@ -93,7 +94,7 @@ fn count_lines(path: &Path) -> Result<u64> {
 
 pub fn extension(path: &Path) -> String {
     path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| ext.to_string())
-        .unwrap_or(String::new())
+        .and_then(OsStr::to_str)
+        .map(std::string::ToString::to_string)
+        .unwrap_or_default()
 }
