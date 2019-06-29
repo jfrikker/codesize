@@ -39,6 +39,9 @@ fn main() {
                           .arg(Arg::with_name("h")
                             .short("h")
                             .help("Output human-readable numbers"))
+                          .arg(Arg::with_name("DIRECTORY")
+                            .help("Base directory")
+                            .index(1))
                             .get_matches();
     let count_type = if matches.is_present("s") {
         CountType::Bytes
@@ -50,10 +53,12 @@ fn main() {
 
     let human_readable = matches.is_present("h");
 
+    let base_dir = matches.value_of("DIRECTORY").unwrap_or(".").to_owned();
+
     let (fut, chan) = collectors::counter();
 
     let prog = ok(()).and_then(move |_| {
-        let walker = walker::walk(Path::new(".").to_path_buf(),
+        let walker = walker::walk(Path::new(&base_dir).to_path_buf(),
             move |path, meta| count_file(count_type, path, meta, chan.clone()));
         spawn(walker);
         fut
