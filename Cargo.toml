@@ -1,0 +1,10 @@
+[package]
+name = "codesize"
+version = "0.1.0"
+authors = ["Joe Frikker <jfrikker@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+futures = "0.1"
+tokio = "0.1"
+tokio-fs = "0.1"
