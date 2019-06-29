@@ -2,11 +2,8 @@ mod collectors;
 
 use collectors::PerExtensionCount;
 use clap::{Arg, App};
-use std::fmt::Debug;
-use std::fs::Metadata;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Result};
-use std::os::unix::io::{FromRawFd, RawFd};
+use std::io::{Read, Result};
 use std::path::Path;
 use walkdir::WalkDir;
 
