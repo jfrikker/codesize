@@ -32,3 +32,10 @@ fn walk_helper<F>(base: PathBuf, visit: Arc<F>) -> impl Future<Item=(), Error=Er
                 })
         })
 }
+
+pub fn extension(path: &Path) -> String {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_string())
+        .unwrap_or(String::new())
+}
