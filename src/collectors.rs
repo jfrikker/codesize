@@ -1,18 +1,48 @@
 use std::collections::HashMap;
+use std::collections::hash_map::{IntoIter as MapIntoIter};
+
+struct PerExtension<D> {
+    data: HashMap<String, D>
+}
+
+impl <D: Default> PerExtension<D> {
+    fn new() -> Self {
+        PerExtension {
+            data: HashMap::new()
+        }
+    }
+
+    fn increment(&mut self, ext: String, f: impl FnOnce(&mut D)) {
+        f(self.data.entry(ext).or_insert(D::default()));
+    }
+
+    fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+}
+
+impl <D> IntoIterator for PerExtension<D> {
+    type Item = (String, D);
+    type IntoIter = MapIntoIter<String, D>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.data.into_iter()
+    }
+}
 
 pub struct PerExtensionCount {
-    count: HashMap<String, u64>
+    count: PerExtension<u64>
 }
 
 impl PerExtensionCount {
     pub fn new() -> Self {
         PerExtensionCount {
-            count: HashMap::new()
+            count: PerExtension::new()
         }
     }
 
     pub fn increment(&mut self, ext: String, count: u64) {
-        *self.count.entry(ext).or_insert(0) += count;
+        self.count.increment(ext, |c| *c += count)
     }
 
 
@@ -79,3 +109,8 @@ fn format_human_readable(mut num: u64, base: u64) -> String {
 
     format!("{}{}", num, suffix)
 }
+
+pub struct PerExtensionMax {
+    queues: HashMap<String, u64>
+}
+
