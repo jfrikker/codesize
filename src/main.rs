@@ -56,7 +56,7 @@ fn main() -> Result<()> {
     let use_git = matches.is_present("git");
     let base_dir = matches.value_of("DIRECTORY").unwrap_or(".").to_owned();
 
-    let mut counts = PerExtensionCount::new();
+    let mut counts = PerExtensionCount::default();
 
     if use_git {
         walk_git(&base_dir, count_type, &mut counts)?;

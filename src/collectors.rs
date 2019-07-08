@@ -1,17 +1,12 @@
 use std::collections::HashMap;
 use std::collections::hash_map::{IntoIter as MapIntoIter};
 
+#[derive(Default)]
 struct PerExtension<D> {
     data: HashMap<String, D>
 }
 
 impl <D: Default> PerExtension<D> {
-    fn new() -> Self {
-        PerExtension {
-            data: HashMap::new()
-        }
-    }
-
     fn increment(&mut self, ext: String, f: impl FnOnce(&mut D)) {
         f(self.data.entry(ext).or_insert(D::default()));
     }
@@ -30,17 +25,12 @@ impl <D> IntoIterator for PerExtension<D> {
     }
 }
 
+#[derive(Default)]
 pub struct PerExtensionCount {
     count: PerExtension<u64>
 }
 
 impl PerExtensionCount {
-    pub fn new() -> Self {
-        PerExtensionCount {
-            count: PerExtension::new()
-        }
-    }
-
     pub fn increment(&mut self, ext: String, count: u64) {
         self.count.increment(ext, |c| *c += count)
     }
