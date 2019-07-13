@@ -45,6 +45,12 @@ fn main() -> Result<()> {
                             .long("largest")
                             .takes_value(true)
                             .help("Output the largest files per type"))
+                          .arg(Arg::with_name("ext")
+                            .long("ext")
+                            .takes_value(true)
+                            .multiple(true)
+                            .number_of_values(1)
+                            .help("Output the largest files per type"))
                           .arg(Arg::with_name("DIRECTORY")
                             .help("Base directory")
                             .index(1))
@@ -61,6 +67,7 @@ fn main() -> Result<()> {
     let use_git = matches.is_present("git");
     let base_dir = matches.value_of("DIRECTORY").unwrap_or(".").to_owned();
     let largest: Option<usize> = matches.value_of("largest_count").map(|s| s.parse().unwrap());
+    let extensions: Vec<&str> = matches.values_of("ext").map(|i| i.collect()).unwrap_or_else(Vec::default);
 
     let mut counts: Box<dyn Collector> = largest
         .map(|count| {
@@ -73,9 +80,9 @@ fn main() -> Result<()> {
         });
 
     if use_git {
-        walk_git(&base_dir, count_type, counts.as_mut())?;
+        walk_git(&base_dir, count_type, extensions, counts.as_mut())?;
     } else {
-        walk_normal(&base_dir, count_type, counts.as_mut())?;
+        walk_normal(&base_dir, count_type, extensions, counts.as_mut())?;
     }
 
     if !human_readable {
@@ -89,11 +96,16 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn walk_normal<P: AsRef<Path>>(base_dir: P, count_type: CountType, counts: &mut dyn Collector) -> Result<()> {
+fn walk_normal<P: AsRef<Path>>(base_dir: P, count_type: CountType, 
+                               extension_filter: Vec<&str>,
+                               counts: &mut dyn Collector) -> Result<()> {
     for entry in WalkDir::new(base_dir) {
         let entry = entry?;
         if entry.file_type().is_file() {
             let ext = extension(entry.path());
+            if !extension_filter.is_empty() && !extension_filter.contains(&(ext.as_ref())) {
+                continue;
+            }
             let count = match count_type {
                 CountType::Files => 1,
                 CountType::Bytes => entry.metadata()?.len(),
@@ -106,11 +118,16 @@ fn walk_normal<P: AsRef<Path>>(base_dir: P, count_type: CountType, counts: &mut 
     Ok(())
 }
 
-fn walk_git<P: AsRef<Path>>(base_dir: P, count_type: CountType, counts: &mut dyn Collector) -> Result<()> {
+fn walk_git<P: AsRef<Path>>(base_dir: P, count_type: CountType,
+                            extension_filter: Vec<&str>,
+                            counts: &mut dyn Collector) -> Result<()> {
     let repo = Repository::open(&base_dir)?;
     for entry in repo.index()?.iter() {
         let path = Path::new(OsStr::from_bytes(&entry.path));
         let ext = extension(path);
+        if !extension_filter.is_empty() && !extension_filter.contains(&(ext.as_ref())) {
+            continue;
+        }
         let count = match count_type {
             CountType::Files => 1,
             CountType::Bytes => entry.file_size as u64,

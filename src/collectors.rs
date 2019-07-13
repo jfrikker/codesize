@@ -144,7 +144,7 @@ impl Collector for PerExtensionMax {
         for (ext, queue) in self.queues {
             println!("{}", ext);
             for Reverse(elem) in queue.into_sorted_vec() {
-                println!("{} {}", format_human_readable(elem.size, human_readable_base), elem.value);
+                println!("  {} {}", format_human_readable(elem.size, human_readable_base), elem.value);
             }
         }
     }
