@@ -71,39 +71,38 @@ impl Collector for PerExtensionCount {
         });
 
         for (ext, count) in counts {
-            if human_readable_base.is_none() {
-                println!("{} {}", ext, count);
-            } else {
-                println!("{} {}", ext, format_human_readable(count, human_readable_base.unwrap()))
-            }
+            println!("{} {}", ext, format_human_readable(count, human_readable_base))
         }
     }
 }
 
 #[allow(clippy::useless_let_if_seq)]
-fn format_human_readable(mut num: u64, base: u64) -> String {
-    let mut suffix = "";
-    if num >= 10000 {
-        num /= base;
-        suffix = "K";
-    }
+fn format_human_readable(mut num: u64, base: Option<u64>) -> String {
+    base.map(|base| {
+        let mut suffix = "";
+        if num >= 10000 {
+            num /= base;
+            suffix = "K";
+        }
 
-    if num >= 10000 {
-        num /= base;
-        suffix = "M";
-    }
-    
-    if num >= 10000 {
-        num /= base;
-        suffix = "G";
-    }
-    
-    if num >= 10000 {
-        num /= base;
-        suffix = "T";
-    }
+        if num >= 10000 {
+            num /= base;
+            suffix = "M";
+        }
+        
+        if num >= 10000 {
+            num /= base;
+            suffix = "G";
+        }
+        
+        if num >= 10000 {
+            num /= base;
+            suffix = "T";
+        }
 
-    format!("{}{}", num, suffix)
+        format!("{}{}", num, suffix)
+    })
+    .unwrap_or_else(|| format!("{}", num))
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -145,7 +144,7 @@ impl Collector for PerExtensionMax {
         for (ext, queue) in self.queues {
             println!("{}", ext);
             for Reverse(elem) in queue.into_sorted_vec() {
-                println!("  {}: {}", elem.size, elem.value);
+                println!("{} {}", format_human_readable(elem.size, human_readable_base), elem.value);
             }
         }
     }
