@@ -1,3 +1,8 @@
+#![warn(clippy::correctness)]
+#![warn(clippy::complexity)]
+#![warn(clippy::perf)]
+#![warn(clippy::style)]
+
 #[macro_use] extern crate quick_error;
 
 mod collectors;
@@ -67,7 +72,7 @@ fn main() -> Result<()> {
     let use_git = matches.is_present("git");
     let base_dir = matches.value_of("DIRECTORY").unwrap_or(".").to_owned();
     let largest: Option<usize> = matches.value_of("largest_count").map(|s| s.parse().unwrap());
-    let extensions: Vec<&str> = matches.values_of("ext").map(|i| i.collect()).unwrap_or_else(Vec::default);
+    let extensions: Vec<&str> = matches.values_of("ext").map(Iterator::collect).unwrap_or_else(Vec::default);
 
     let mut counts: Box<dyn Collector> = largest
         .map(|count| {
@@ -130,7 +135,7 @@ fn walk_git<P: AsRef<Path>>(base_dir: P, count_type: CountType,
         }
         let count = match count_type {
             CountType::Files => 1,
-            CountType::Bytes => entry.file_size as u64,
+            CountType::Bytes => u64::from(entry.file_size),
             CountType::Lines => {
                 let mut full_path = PathBuf::new();
                 full_path.push(&base_dir);

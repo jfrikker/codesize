@@ -1,3 +1,8 @@
+#![warn(clippy::correctness)]
+#![warn(clippy::complexity)]
+#![warn(clippy::perf)]
+#![warn(clippy::style)]
+
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, BTreeMap};
 use std::collections::btree_map::{IntoIter as MapIntoIter};
@@ -15,7 +20,7 @@ struct PerExtension<D> {
 
 impl <D: Default> PerExtension<D> {
     fn increment(&mut self, ext: String, f: impl FnOnce(&mut D)) {
-        f(self.data.entry(ext).or_insert(D::default()));
+        f(self.data.entry(ext).or_insert_with(D::default));
     }
 
     fn is_empty(&self) -> bool {
