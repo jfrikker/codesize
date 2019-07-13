@@ -3,7 +3,7 @@
 mod collectors;
 mod error;
 
-use collectors::PerExtensionCount;
+use collectors::{Collector, PerExtensionCount, PerExtensionMax};
 use clap::{Arg, App};
 use error::Result;
 use git2::Repository;
@@ -40,6 +40,11 @@ fn main() -> Result<()> {
                           .arg(Arg::with_name("git")
                             .long("git")
                             .help("Only look at files in the git index"))
+                          .arg(Arg::with_name("largest_count")
+                            .short("l")
+                            .long("largest")
+                            .takes_value(true)
+                            .help("Output the largest files per type"))
                           .arg(Arg::with_name("DIRECTORY")
                             .help("Base directory")
                             .index(1))
@@ -55,13 +60,22 @@ fn main() -> Result<()> {
     let human_readable = matches.is_present("h");
     let use_git = matches.is_present("git");
     let base_dir = matches.value_of("DIRECTORY").unwrap_or(".").to_owned();
+    let largest: Option<usize> = matches.value_of("largest_count").map(|s| s.parse().unwrap());
 
-    let mut counts = PerExtensionCount::default();
+    let mut counts: Box<dyn Collector> = largest
+        .map(|count| {
+            let res: Box<dyn Collector> = Box::new(PerExtensionMax::new(count));
+            res
+        })
+        .unwrap_or_else(|| {
+            let res: Box<dyn Collector> = Box::new(PerExtensionCount::default());
+            res
+        });
 
     if use_git {
-        walk_git(&base_dir, count_type, &mut counts)?;
+        walk_git(&base_dir, count_type, counts.as_mut())?;
     } else {
-        walk_normal(&base_dir, count_type, &mut counts)?;
+        walk_normal(&base_dir, count_type, counts.as_mut())?;
     }
 
     if !human_readable {
@@ -75,7 +89,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn walk_normal<P: AsRef<Path>>(base_dir: P, count_type: CountType, counts: &mut PerExtensionCount) -> Result<()> {
+fn walk_normal<P: AsRef<Path>>(base_dir: P, count_type: CountType, counts: &mut dyn Collector) -> Result<()> {
     for entry in WalkDir::new(base_dir) {
         let entry = entry?;
         if entry.file_type().is_file() {
@@ -85,14 +99,14 @@ fn walk_normal<P: AsRef<Path>>(base_dir: P, count_type: CountType, counts: &mut 
                 CountType::Bytes => entry.metadata()?.len(),
                 CountType::Lines => count_lines(entry.path())?
             };
-            counts.increment(ext, count);
+            counts.increment(ext, entry.path(), count);
         }
     }
 
     Ok(())
 }
 
-fn walk_git<P: AsRef<Path>>(base_dir: P, count_type: CountType, counts: &mut PerExtensionCount) -> Result<()> {
+fn walk_git<P: AsRef<Path>>(base_dir: P, count_type: CountType, counts: &mut dyn Collector) -> Result<()> {
     let repo = Repository::open(&base_dir)?;
     for entry in repo.index()?.iter() {
         let path = Path::new(OsStr::from_bytes(&entry.path));
@@ -107,7 +121,7 @@ fn walk_git<P: AsRef<Path>>(base_dir: P, count_type: CountType, counts: &mut Per
                 count_lines(&full_path)?
             }
         };
-        counts.increment(ext, count);
+        counts.increment(ext, path, count);
     }
 
     Ok(())

@@ -1,9 +1,16 @@
-use std::collections::HashMap;
-use std::collections::hash_map::{IntoIter as MapIntoIter};
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, BTreeMap};
+use std::collections::btree_map::{IntoIter as MapIntoIter};
+use std::path::Path;
+
+pub trait Collector {
+    fn increment(&mut self, ext: String, path: &Path, count: u64);
+    fn print_counts(self: Box<Self>, human_readable_base: Option<u64>);
+}
 
 #[derive(Default)]
 struct PerExtension<D> {
-    data: HashMap<String, D>
+    data: BTreeMap<String, D>
 }
 
 impl <D: Default> PerExtension<D> {
@@ -30,13 +37,12 @@ pub struct PerExtensionCount {
     count: PerExtension<u64>
 }
 
-impl PerExtensionCount {
-    pub fn increment(&mut self, ext: String, count: u64) {
+impl Collector for PerExtensionCount {
+    fn increment(&mut self, ext: String, _: &Path, count: u64) {
         self.count.increment(ext, |c| *c += count)
     }
 
-
-    pub fn print_counts(self, human_readable_base: Option<u64>) {
+    fn print_counts(self: Box<Self>, human_readable_base: Option<u64>) {
         if self.count.is_empty() {
             return;
         }
@@ -100,7 +106,47 @@ fn format_human_readable(mut num: u64, base: u64) -> String {
     format!("{}{}", num, suffix)
 }
 
-pub struct PerExtensionMax {
-    queues: HashMap<String, u64>
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct WithSize<T> {
+    size: u64,
+    value: T
 }
 
+pub struct PerExtensionMax {
+    queues: PerExtension<BinaryHeap<Reverse<WithSize<String>>>>,
+    target: usize
+}
+
+impl PerExtensionMax {
+    pub fn new(target: usize) -> Self {
+        PerExtensionMax {
+            queues: PerExtension::default(),
+            target
+        }
+    }
+}
+
+impl Collector for PerExtensionMax {
+    fn increment(&mut self, ext: String, path: &Path, count: u64) {
+        let elem = WithSize {
+            size: count,
+            value: path.to_str().unwrap().to_string()
+        };
+        let target = self.target;
+        self.queues.increment(ext, |heap| {
+            heap.push(Reverse(elem));
+            while heap.len() > target {
+                heap.pop();
+            }
+        });
+    }
+
+    fn print_counts(self: Box<Self>, human_readable_base: Option<u64>) {
+        for (ext, queue) in self.queues {
+            println!("{}", ext);
+            for Reverse(elem) in queue.into_sorted_vec() {
+                println!("  {}: {}", elem.size, elem.value);
+            }
+        }
+    }
+}
